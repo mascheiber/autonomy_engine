@@ -12,6 +12,7 @@
 #ifndef AUTONOMY_H
 #define AUTONOMY_H
 
+#include <mavros_msgs/BatteryStatus.h>
 #include <mavros_msgs/RCIn.h>
 #include <mission_sequencer/MissionRequest.h>
 #include <mission_sequencer/MissionResponse.h>
@@ -178,6 +179,11 @@ private:
   void missionSequencerWaypointReachedCallback(const mission_sequencer::MissionWaypointStampedConstPtr& msg);
 
   /**
+   * @brief Mavros battery status callback, used for logging.
+   */
+  void batteryCallback(const mavros_msgs::BatteryStatusConstPtr& msg);
+
+  /**
    * @brief Radio control callback
    */
   void rcCallback(const mavros_msgs::RCInConstPtr& msg);
@@ -285,6 +291,7 @@ private:
   ros::Subscriber sub_watchdog_status_;
   ros::Subscriber sub_landing_detection_;
   ros::Subscriber sub_mission_sequencer_response_;
+  ros::Subscriber sub_battery_;
   ros::Subscriber sub_rc_;
 
   /// Subscribers for logging
@@ -366,6 +373,9 @@ private:
   /// Booleans used to manage aux registration
   std::atomic<bool> register_aux_ = false;
   std::atomic<bool> aux_registered_ = false;
+
+  /// Battery Status
+  float last_battery_voltage_percent_ = 1.0;
 
   /// Allowed state transitions
   const std::unordered_map<std::string, std::vector<std::string>> allowed_state_transitions_ = {
