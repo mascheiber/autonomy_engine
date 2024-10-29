@@ -44,6 +44,7 @@ struct autonomyOptions
   const std::string mission_sequencer_waypoints_topic;
   const std::string mission_sequencer_waypoint_reached_topic;
   const std::string rc_topic;
+  const std::string battery_status_topic;
 
   /// service Names
   const std::string watchdog_start_service_name;
@@ -97,6 +98,9 @@ struct autonomyOptions
 
   /// Log Display Level
   const LogDisplayLevel log_display_level;  // 0: basic log, 1: waypoint logs, 2: interaction logs, 3: all logs
+
+  /// Battery Status Update Interval (percent)
+  const float battery_voltage_interval_percent;
 
   /// Print function
   inline const std::string printAutonomyOptions()
@@ -180,9 +184,14 @@ struct autonomyOptions
     ss << " - Landing AUX channel:                 " << landing_aux_channel << '\n';
 
     ss << " - Display Logging Level:               " << log_display_level << '\n';
-    if (log_display_level > 0)
+    if (log_display_level >= LogDisplayLevel::WAYPOINT)
     {
       ss << " - Subscribed to:                       " << mission_sequencer_waypoint_reached_topic << '\n';
+    }
+    if (log_display_level >= LogDisplayLevel::SYSTEM)
+    {
+      ss << " - Subscribed to:                       " << battery_status_topic << '\n';
+      ss << " - Battery Status Interval (%):         " << battery_voltage_interval_percent * 100 << '\n';
     }
 
     ss << "-------------------------------------------------\n\n";

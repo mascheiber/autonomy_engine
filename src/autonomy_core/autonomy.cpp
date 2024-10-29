@@ -132,10 +132,15 @@ Autonomy::Autonomy(ros::NodeHandle& nh) : logger_(nh), nh_(nh)
   sub_rc_ = nh_.subscribe(opts_->rc_topic, 100, &Autonomy::rcCallback, this);
 
   // Subscribe to info callbacks (for logging only)
-  if (opts_->log_display_level > 0)
+  if (opts_->log_display_level >= LogDisplayLevel::WAYPOINT)
   {
-    sub_ms_waypoint_reached_ = nh_.subscribe(opts_->mission_sequencer_waypoint_reached_topic, 100,
+    sub_ms_waypoint_reached_ = nh_.subscribe(opts_->mission_sequencer_waypoint_reached_topic, 1,
                                              &Autonomy::missionSequencerWaypointReachedCallback, this);
+
+    if (opts_->log_display_level >= LogDisplayLevel::SYSTEM)
+    {
+      sub_battery_ = nh_.subscribe(opts_->battery_status_topic, 1, &Autonomy::batteryCallback, this);
+    }
   }
 
   // Instanciate flight timer and connect signal
@@ -345,6 +350,7 @@ void Autonomy::parseParams()
   std::string logger_filepath;
   std::string trajectory_dir;
   std::string rc_topic;
+  std::string battery_status_topic;
 
   // Define auxilliary variables foreach paramter: std::vector
   std::vector<std::string> inflight_sensor_init_services_name;
@@ -362,7 +368,6 @@ void Autonomy::parseParams()
   int data_recording_delay_after_failure_s = 0;
   int mission_id_no_ui = -1;
   int landing_aux_channel = -1;
-  LogDisplayLevel log_display_level = LogDisplayLevel::BASIC;
 
   // Define auxilliary variables foreach paramter: bool
   bool activate_user_interface;
@@ -376,6 +381,10 @@ void Autonomy::parseParams()
   bool sequence_multiple_in_flight;
   bool inflight_sensors_init_service;
   bool register_aux;
+
+  // Define auxilliary variables foreach logging parameter: various
+  LogDisplayLevel log_display_level = LogDisplayLevel::BASIC;
+  float battery_voltage_interval_percent = 0.05;
 
   // Get general parmaters from ros param server
   getParameter(activate_user_interface, "activate_user_interface");
@@ -490,11 +499,25 @@ void Autonomy::parseParams()
   getParameterDefault<int>(ldl, "log_display_level", 0);
   log_display_level = static_cast<LogDisplayLevel>(ldl);
 
-  // Get mission sequencer waypoint reached topic only if log display level for waypoints is enabled
-  if (log_display_level != LogDisplayLevel::BASIC)
+  // get parameters depending on log display level
+  if (log_display_level >= LogDisplayLevel::WAYPOINT)
   {
+    // Get mission sequencer waypoint reached topic only if log display level for waypoints is enabled
     getParameterDefault<std::string>(mission_sequencer_waypoint_reached_topic,
                                      "mission_sequencer_waypoint_reached_topic", "/mission_sequencer/waypoint_reached");
+  }
+
+  if (log_display_level >= LogDisplayLevel::SYSTEM)
+  {
+    // Get battery status topic
+    getParameterDefault<std::string>(battery_status_topic, "battery_status_topic", "/mavros/battery_status");
+
+    // Get battery status update level
+    getParameterDefault<float>(battery_voltage_interval_percent, "battery_voltage_interval_percent",
+                               battery_voltage_interval_percent);
+    // check if input is in percent or fraction
+    if (battery_voltage_interval_percent > 1.0)
+      battery_voltage_interval_percent /= 100.0;
   }
 
   // Make options
@@ -507,6 +530,7 @@ void Autonomy::parseParams()
                                                               mission_sequencer_waypoints_topic,
                                                               mission_sequencer_waypoint_reached_topic,
                                                               rc_topic,
+                                                              battery_status_topic,
                                                               watchdog_start_service_name,
                                                               estimator_supervisor_service_name,
                                                               data_recrding_service_name,
@@ -534,7 +558,8 @@ void Autonomy::parseParams()
                                                               sequence_multiple_in_flight,
                                                               mission_id_no_ui,
                                                               static_cast<size_t>(landing_aux_channel),
-                                                              log_display_level }));
+                                                              log_display_level,
+                                                              battery_voltage_interval_percent }));
 
   // Get missions
   getMissions();
@@ -1125,6 +1150,10 @@ void Autonomy::missionSequencerResponceCallback(const mission_sequencer::Mission
 
 void Autonomy::missionSequencerWaypointReachedCallback(const mission_sequencer::MissionWaypointStampedConstPtr& msg)
 {
+  // log message received
+  logger_.logMessage(state_->getStringFromState(), opts_->mission_sequencer_waypoint_reached_topic, true,
+                     "[mission sequencer message] waypoint reached received");
+
   // format msg
   std::stringstream ss;
   ss << "Waypoint [" << std::fixed << std::setprecision(3) << msg->waypoint.x << ", " << msg->waypoint.y << ", "
@@ -1133,6 +1162,29 @@ void Autonomy::missionSequencerWaypointReachedCallback(const mission_sequencer::
      << "       Holding at this waypoint for " << msg->waypoint.holdtime << "s..";
 
   logger_.logUI(state_->getStringFromState(), GREEN_ESCAPE, formatMsg(ss.str(), 1), LogDisplayLevel::WAYPOINT);
+}
+
+void Autonomy::batteryCallback(const mavros_msgs::BatteryStatusConstPtr& msg)
+{
+  // log message received
+  logger_.logMessage(state_->getStringFromState(), opts_->battery_status_topic, true,
+                     "[mavros message] battery status received");
+
+  if (msg->remaining < last_battery_voltage_percent_ - opts_->battery_voltage_interval_percent)
+  {
+    // format msg
+    std::stringstream ss1, ss2;
+    ss1 << "Reported battery percentage (" << (int)(msg->remaining * 100) << "%) < "
+        << (int)(100 * (last_battery_voltage_percent_ - opts_->battery_voltage_interval_percent)) << "%";
+    ss2 << "Voltage: " << std::fixed << std::setprecision(2) << msg->voltage << "V";
+
+    logger_.logUI(state_->getStringFromState(), MAGENTA_ESCAPE, formatMsg(ss1.str(), 1), LogDisplayLevel::SYSTEM);
+    logger_.logInfo(state_->getStringFromState(), ss2.str());
+
+    last_battery_voltage_percent_ -= opts_->battery_voltage_interval_percent;
+  }
+
+  // TODO(scm): new feature to add saftey landing if battery remaining or voltage below a certain threshold
 }
 
 void Autonomy::missionSequencerRequest(const int& request)
